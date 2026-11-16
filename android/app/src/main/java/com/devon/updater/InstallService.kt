@@ -39,9 +39,10 @@ class InstallService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // startForeground first: a startForegroundService() call must always be answered, even if we then ignore it
+        startForeground(Notifications.ID_PROGRESS, Notifications.progress(this, "Starting", null), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         if (InstallState.flow.value.running) return START_NOT_STICKY
         val manifest = intent?.getStringExtra(EXTRA_MANIFEST)?.let { parseManifest(it) }
-        startForeground(Notifications.ID_PROGRESS, Notifications.progress(this, "Starting", null), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         InstallState.flow.value = InstallUi(running = true, text = "Starting")
         Thread {
             val nm = getSystemService(NotificationManager::class.java)
