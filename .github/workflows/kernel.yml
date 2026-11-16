@@ -1,0 +1,137 @@
+name: kernel
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Nightly date YYYYMMDD (default: newest unreleased)"
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: kernel
+  cancel-in-progress: false
+
+env:
+  LINEAGE_API: https://download.lineageos.org/api/v2/devices/devon/builds
+  LINEAGE_MAJOR: "24"
+  LLVM_VERSION: "22.1.8"
+  LLVM_SHA256: "df0e1ecf16caf3489a272a5eea4eec9b0d82878f6477fa309504f918a0006384"
+  MAGISK_VERSION: "v31.1"
+  MAGISK_SHA256: "89cefac0a318afa39fb3880c45c87b036c05bc1ebf02a7a715b7f8d7c26ac6e7"
+
+jobs:
+  pending:
+    runs-on: ubuntu-24.04
+    outputs:
+      date: ${{ steps.p.outputs.date }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: p
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl -fsSL "$LINEAGE_API" -o api.json
+          if [ -n "${{ inputs.date }}" ]; then
+            d="${{ inputs.date }}"
+          else
+            tags=$(gh release list --limit 100 --json tagName -q '.[].tagName' || true)
+            d=$(python3 -I kernel/ci/find-pending.py api.json "$LINEAGE_MAJOR" $tags)
+          fi
+          echo "pending: ${d:-none}"
+          echo "date=$d" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: pending
+    if: needs.pending.outputs.date != ''
+    runs-on: ubuntu-24.04
+    env:
+      DATE: ${{ needs.pending.outputs.date }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL && df -h /
+
+      - name: Host packages
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq bc bison flex libssl-dev libelf-dev cpio e2fsprogs erofs-utils lz4 xz-utils
+
+      - name: Cache LLVM
+        id: llvm
+        uses: actions/cache@v4
+        with:
+          path: ~/llvm
+          key: llvm-${{ env.LLVM_VERSION }}
+
+      - name: Download LLVM
+        if: steps.llvm.outputs.cache-hit != 'true'
+        run: |
+          curl -fsSL -o /tmp/llvm.tar.xz "https://github.com/llvm/llvm-project/releases/download/llvmorg-$LLVM_VERSION/LLVM-$LLVM_VERSION-Linux-X64.tar.xz"
+          echo "$LLVM_SHA256  /tmp/llvm.tar.xz" | sha256sum -c
+          mkdir -p ~/llvm && tar -xJf /tmp/llvm.tar.xz -C ~/llvm --strip-components=1 && rm /tmp/llvm.tar.xz
+
+      - name: magiskboot
+        run: |
+          curl -fsSL -o /tmp/magisk.apk "https://github.com/topjohnwu/Magisk/releases/download/$MAGISK_VERSION/Magisk-$MAGISK_VERSION.apk"
+          echo "$MAGISK_SHA256  /tmp/magisk.apk" | sha256sum -c
+          unzip -p /tmp/magisk.apk lib/x86_64/libmagiskboot.so > ~/magiskboot && chmod +x ~/magiskboot
+
+      - name: Download nightly
+        run: |
+          mkdir -p ~/n && cd ~/n
+          curl -fsSL "$LINEAGE_API" -o api.json
+          python3 -I - "$DATE" <<'PY'
+          import json, sys, subprocess
+          d = sys.argv[1]
+          b = next(b for b in json.load(open("api.json")) if b["date"].replace("-", "") == d)
+          for f in b["files"]:
+              n = f["filename"]
+              if n == "boot.img" or n.endswith("-signed.zip"):
+                  out = "ota.zip" if n.endswith(".zip") else n
+                  subprocess.run(["curl", "-fsSL", "-o", out, f["url"]], check=True)
+                  subprocess.run(["sh", "-c", f"echo '{f['sha256']}  {out}' | sha256sum -c"], check=True)
+          PY
+
+      - name: Kernel source
+        run: |
+          . kernel/pins.env
+          hash=$(python3 -I kernel/kinfo.py hash ~/n/boot.img)
+          echo "KHASH=$hash" >> "$GITHUB_ENV"
+          git clone -q --depth 400 --single-branch --branch "$KERNEL_BRANCH" "$KERNEL_REPO" ~/src
+          git -C ~/src checkout -q "$(git -C ~/src rev-parse --verify "$hash^{commit}")" || { echo "::error::kernel commit $hash not on $KERNEL_BRANCH"; exit 1; }
+
+      - name: Apply patches
+        run: kernel/apply-patches.sh ~/src
+
+      - name: Build
+        run: LLVM_BIN=~/llvm/bin kernel/build.sh ~/src ~/n/boot.img
+
+      - name: Module gate
+        run: |
+          kernel/ci/extract-vendor-modules.sh ~/n/ota.zip ~/mods
+          python3 -I kernel/modcheck.py ~/src/out/Module.symvers "$(python3 -I kernel/kinfo.py release ~/n/boot.img)" ~/mods
+
+      - name: Repack
+        run: |
+          MAGISKBOOT=~/magiskboot kernel/repack.sh ~/n/boot.img ~/src/out/arch/arm64/boot/Image "boot-$DATE-sukisu.img"
+          python3 -I kernel/kinfo.py banner "boot-$DATE-sukisu.img"
+
+      - name: Publish
+        run: |
+          url="https://github.com/$GITHUB_REPOSITORY/releases/download/k-$DATE/boot-$DATE-sukisu.img"
+          python3 -I kernel/ci/make-manifest.py ~/n/api.json "$DATE" "boot-$DATE-sukisu.img" "$url" "$KHASH" manifest.json
+          gh release create "k-$DATE" "boot-$DATE-sukisu.img" manifest.json \
+            --title "Kernel for Lineage $DATE" \
+            --notes "SukiSU + SUSFS + NoMount for devon nightly $DATE (kernel $KHASH). Vendor modules verified." \
+            --latest
+
+  tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: cd kernel && python3 -I -m unittest discover -s tests -v
