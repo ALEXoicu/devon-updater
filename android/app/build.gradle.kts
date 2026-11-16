@@ -5,7 +5,7 @@ plugins {
 }
 
 val manifestUrl = (findProperty("manifestUrl") as String?)
-    ?: "https://github.com/OWNER/devon-updater/releases/latest/download/manifest.json"
+    ?: "https://github.com/ALEXoicu/devon-updater/releases/latest/download/manifest.json"
 
 android {
     namespace = "com.devon.updater"
