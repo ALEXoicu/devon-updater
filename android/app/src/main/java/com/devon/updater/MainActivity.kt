@@ -65,11 +65,11 @@ data class DeviceInfo(val build: String, val kernel: String, val root: Boolean, 
 private fun readDevice(ctx: android.content.Context): DeviceInfo {
     val sh = SuShell()
     val root = hasRoot(sh)
-    val kernel = runCatching { java.io.File("/proc/version").readText().trim() }.getOrElse { "unknown" }
+    val kernel = sh.run("cat /proc/version").out.trim().ifEmpty { "unknown" }
         .let { Regex("""Linux version (\S+) \((\S+)\)""").find(it)?.let { m -> "${m.groupValues[1]} (${m.groupValues[2]})" } ?: it }
     val disabled = if (root) sh.run("pm list packages -d org.lineageos.updater").out.contains("org.lineageos.updater") else null
     val gapps = runCatching { ctx.packageManager.getPackageInfo("com.google.android.gms", 0); true }.getOrDefault(false)
-    return DeviceInfo(getprop("ro.lineage.version"), kernel, root, disabled, gapps)
+    return DeviceInfo(runCatching { lineageVersion() }.getOrElse { "unknown (needs root)" }, kernel, root, disabled, gapps)
 }
 
 /** After a reboot into the new slot: confirm root works and record a success. */

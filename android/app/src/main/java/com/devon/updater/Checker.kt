@@ -15,7 +15,17 @@ const val LINEAGE_API = "https://download.lineageos.org/api/v2/devices/devon/bui
 fun getprop(name: String): String =
     ProcessBuilder("getprop", name).start().inputStream.bufferedReader().readText().trim()
 
-fun installed(): Installed = parseLineageVersion(getprop("ro.lineage.version"))
+/**
+ * ro.lineage.version is labelled custom_version_prop, which SELinux hides from normal apps,
+ * so read it as root; plain getprop is only a fallback.
+ */
+fun lineageVersion(): String {
+    val viaSu = com.devon.updater.device.SuShell().run("getprop ro.lineage.version")
+    return viaSu.out.trim().ifEmpty { getprop("ro.lineage.version") }
+        .ifEmpty { throw IllegalStateException("can't read ro.lineage.version — allow devon-updater in SukiSU manager") }
+}
+
+fun installed(): Installed = parseLineageVersion(lineageVersion())
 
 data class CheckResult(val installed: Installed, val decision: Decision, val manifestError: String?)
 
