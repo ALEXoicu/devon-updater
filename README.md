@@ -4,6 +4,14 @@ Keeps a Moto G32 (`devon`) on the newest LineageOS 24 nightly **without losing r
 each nightly gets a matching SukiSU + SUSFS + NoMount kernel built by GitHub Actions, and an Android app
 installs nightly + kernel to the inactive slot with one tap.
 
+## Download
+
+- **App APK:** release tag [`app-v1.0`](https://github.com/ALEXoicu/devon-updater/releases/tag/app-v1.0) → `devon-updater-1.0.apk`.
+  (App releases are tagged `app-v*` and never marked "latest".)
+- **Kernels:** releases tagged `k-<yyyymmdd>` (one per Lineage nightly), each with `boot-<date>-sukisu.img` and
+  `manifest.json`. The newest kernel release is always the one marked **Latest** — the app reads
+  `releases/latest/download/manifest.json`, so don't mark any other release as latest.
+
 ## Pieces
 
 - `kernel/` — patch set, pins and scripts. `apply-patches.sh` → `build.sh` → `ci/extract-vendor-modules.sh` +
