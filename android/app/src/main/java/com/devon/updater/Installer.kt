@@ -69,7 +69,6 @@ class Installer(
 
         report(Step.ApplyOta, "Installing to slot $slot", 0f)
         val code = engine.apply(ota) { s, p -> report(Step.ApplyOta, "Installing to slot $slot: ${EngineStatus.name(s)}", p) }
-        shell.run("rm -f ${q(ota)}")
         if (code != 0) {
             store.pending = null
             throw InstallFailed("update_engine failed with error $code")
@@ -106,7 +105,6 @@ class Installer(
     private fun writeKernel() {
         val p = store.pending ?: throw InstallFailed("no pending install")
         report(Step.WriteKernel, "Writing kernel to boot${p.slot}", null)
-        shell.run("rm -f $OTA_DIR/devon-updater-*.zip")
         try {
             boot.write(File(p.bootPath), p.bootSha256, p.slot)
         } catch (e: Exception) {
@@ -115,6 +113,8 @@ class Installer(
             throw InstallFailed("Kernel write failed, update cancelled: ${e.message}", e)
         }
         store.pending = p.copy(kernelWritten = true)
+        // only now: if anything above failed, the verified OTA stays for a quick retry
+        shell.run("rm -f $OTA_DIR/devon-updater-*.zip")
         report(Step.Ready, "Ready — reboot to finish", null)
     }
 

@@ -75,6 +75,9 @@ class DeviceTest {
         w.write(img, imgSha, "_a", allowActiveSlot = true)
         w.write(img, imgSha, "_b")
         assertTrue(sh.log.any { it.contains("of=/dev/block/by-name/boot_b") })
+        val setrw = sh.log.indexOfLast { it == "blockdev --setrw /dev/block/by-name/boot_b" }
+        val dd = sh.log.indexOfLast { it.startsWith("dd ") }
+        assertTrue("setrw must come right before dd", setrw >= 0 && setrw == dd - 1)
     }
 
     @Test fun bootWriterThrowsOnReadbackMismatch() {
@@ -104,6 +107,7 @@ class DeviceTest {
         assertThrows(InstallFailed::class.java) { installer(sh, eng, store).install(manifest()) }
         assertEquals(1, eng.resets)
         assertNull(store.pending)
+        assertFalse("OTA kept for retry", sh.log.any { it.startsWith("rm -f /data/ota_package") })
     }
 
     @Test fun preflightProblemsStopBeforeAnything() {
