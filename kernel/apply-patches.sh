@@ -33,6 +33,8 @@ ln -sfn ../SukiSU-Ultra/kernel drivers/kernelsu
 
 rm -rf NoMount
 git clone -q "${NOMOUNT_MIRROR:-$NOMOUNT_REPO}" NoMount
+# upstream has force-pushed before: fetch the pinned commit by SHA in case no branch has it
+git -C NoMount fetch -q "${NOMOUNT_MIRROR:-$NOMOUNT_REPO}" "$NOMOUNT_COMMIT" 2>/dev/null || true
 git -C NoMount checkout -q "$NOMOUNT_COMMIT"
 ln -sfn ../NoMount/kernel/src fs/nomount
 echo "patches applied to $src"
